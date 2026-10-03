@@ -1,4 +1,27 @@
 {
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/fundamentals.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "public/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/fundamentals.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
+    }
+  ]
+}
+{
   "outputDirectory": "public",
   "functions": {
     "api/fundamentals.js": { "includeFiles": "skill/**", "maxDuration": 30 }
