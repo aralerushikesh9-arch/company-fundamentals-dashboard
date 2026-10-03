@@ -1,0 +1,6 @@
+{
+  "outputDirectory": "public",
+  "functions": {
+    "api/fundamentals.js": { "includeFiles": "skill/**", "maxDuration": 30 }
+  }
+}

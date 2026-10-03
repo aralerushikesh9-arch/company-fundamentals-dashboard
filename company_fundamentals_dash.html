@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Company Fundamentals Dashboard</title>
+
+<style>
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        margin: 0;
+        background: #f4f2f7;
+        color: #333;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 9px;
+    }
+
+    .page {
+        width: 510px;
+        margin: 98px auto 40px;
+    }
+
+    h1 {
+        margin: 0 0 3px;
+        text-align: center;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 15px;
+        line-height: 18px;
+        color: #333;
+        font-weight: 700;
+    }
+
+    .intro {
+        width: 320px;
+        margin: 0 auto 17px;
+        text-align: left;
+        font-size: 7px;
+        line-height: 9px;
+        color: #666;
+    }
+
+    .card {
+        width: 510px;
+        background: #fff;
+        border: 1px solid #d7d4d8;
+        border-radius: 3px;
+        padding: 10px 10px 12px;
+    }
+
+    .card-title {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 11px;
+        font-weight: 700;
+        margin-bottom: 6px;
+        color: #333;
+    }
+
+    .top-fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 9px;
+        margin-bottom: 11px;
+    }
+
+    .field label {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 7px;
+        color: #555;
+    }
+
+    input,
+    select {
+        width: 100%;
+        height: 23px;
+        border: 1px solid #bcbcbc;
+        border-radius: 3px;
+        background: #fff;
+        padding: 3px 7px;
+        font-size: 8px;
+        color: #333;
+        outline: none;
+    }
+
+    input:focus,
+    select:focus {
+        border-color: #633b83;
+        box-shadow: 0 0 0 1px rgba(99, 59, 131, .08);
+    }
+
+    .table {
+        width: 100%;
+    }
+
+    .table-head,
+    .data-row {
+        display: grid;
+        grid-template-columns: 1fr 155px 155px;
+        align-items: center;
+    }
+
+    .table-head {
+        margin-bottom: 2px;
+        color: #666;
+        font-size: 7px;
+    }
+
+    .table-head div:nth-child(2),
+    .table-head div:nth-child(3) {
+        text-align: center;
+    }
+
+    .section {
+        height: 20px;
+        display: flex;
+        align-items: center;
+        padding: 0 5px;
+        background: #e9e1ee;
+        color: #56336e;
+        font-weight: 700;
+        font-size: 8px;
+    }
+
+    .data-row {
+        min-height: 30px;
+        border-bottom: 1px solid #e3e1e3;
+    }
+
+    .data-row .label {
+        padding-left: 5px;
+        font-size: 8px;
+        color: #444;
+    }
+
+    .data-row .previous,
+    .data-row .current {
+        padding: 3px 5px;
+    }
+
+    .data-row input {
+        height: 22px;
+        text-align: right;
+        font-size: 8px;
+    }
+
+    .dash {
+        text-align: center;
+        color: #555;
+        font-size: 8px;
+    }
+
+    .market-title {
+        margin-top: 11px;
+        margin-bottom: 6px;
+        font-size: 8px;
+        font-weight: 700;
+        color: #555;
+        text-transform: uppercase;
+        letter-spacing: .2px;
+    }
+
+    .market-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        column-gap: 9px;
+        row-gap: 8px;
+    }
+
+    .market-grid .field input {
+        text-align: right;
+    }
+
+    .actions {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-top: 9px;
+    }
+
+    button {
+        height: 25px;
+        border-radius: 2px;
+        padding: 0 11px;
+        font-size: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: .15s ease;
+    }
+
+    /* Active Build the module button */
+    .build-module {
+        background: #57317a;
+        color: #fff;
+        border: 1px solid #57317a;
+    }
+
+    .build-module:hover,
+    .build-module.active {
+        background: #472565;
+        color: #fff;
+        border-color: #472565;
+    }
+
+    .build-module:active {
+        transform: translateY(1px);
+    }
+
+    .analyse {
+        background: #fff;
+        color: #57317a;
+        border: 1px solid #57317a;
+    }
+
+    .analyse:hover {
+        background: #57317a;
+        color: #fff;
+    }
+
+    .clear {
+        background: #fff;
+        color: #4e2c6e;
+        border: 1px solid #765b8b;
+    }
+
+    .clear:hover {
+        background: #f3eef6;
+    }
+
+    .module-message {
+        display: none;
+        margin-top: 10px;
+        padding: 7px 9px;
+        background: #f1ebf5;
+        border: 1px solid #d8c9e2;
+        border-radius: 3px;
+        color: #56336e;
+        font-size: 8px;
+    }
+
+    .note {
+        margin: 22px 0 0;
+        font-size: 7px;
+        line-height: 10px;
+        color: #666;
+    }
+
+    @media (max-width: 600px) {
+        .page {
+            width: calc(100% - 24px);
+            margin-top: 35px;
+        }
+
+        .card {
+            width: 100%;
+        }
+
+        .table-head,
+        .data-row {
+            grid-template-columns: 1fr 28% 28%;
+        }
+
+        .intro {
+            width: 70%;
+        }
+
+        .actions {
+            flex-wrap: wrap;
+        }
+    }
+</style>
+</head>
+
+<body>
+
+<div class="page">
+
+    <h1>Company fundamentals dashboard</h1>
+
+    <p class="intro">
+        Enter a company's figures and market data. The app calculates profitability,
+        financial position, returns and valuation in code, so every number is exact,
+        and checks the data. Claude then explains the results using a written Skill (SKILL.md).
+        It describes the numbers and never gives buy, sell or hold advice.
+    </p>
+
+    <div class="card">
+
+        <div class="card-title">Your figures</div>
+
+        <div class="top-fields">
+
+            <div class="field">
+                <label>Company name (optional)</label>
+                <input type="text" id="companyName"
+                       value="Sample Technologies Ltd (fictional)">
+            </div>
+
+            <div class="field">
+                <label>Unit of the financial figures</label>
+                <select id="financialUnit">
+                    <option>Rs crore</option>
+                    <option>Rs lakh</option>
+                    <option>Rs million</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label>Unit of the number of shares</label>
+                <select id="shareUnit">
+                    <option>Crore shares</option>
+                    <option>Lakh shares</option>
+                    <option>Million shares</option>
+                </select>
+            </div>
+
+        </div>
+
+        <div class="table">
+
+            <div class="table-head">
+                <div>Item</div>
+                <div>Previous year</div>
+                <div>Current year</div>
+            </div>
+
+            <div class="section">Income statement</div>
+
+            <div class="data-row">
+                <div class="label">Revenue</div>
+                <div class="previous"><input type="number" value="1000"></div>
+                <div class="current"><input type="number" value="1200"></div>
+            </div>
+
+            <div class="data-row">
+                <div class="label">Operating profit (EBIT)</div>
+                <div class="previous"><input type="number" value="150"></div>
+                <div class="current"><input type="number" value="190"></div>
+            </div>
+
+            <div class="data-row">
+                <div class="label">Depreciation and amortisation</div>
+                <div class="previous"><input type="number" value="40"></div>
+                <div class="current"><input type="number" value="50"></div>
+            </div>
+
+            <div class="data-row">
+                <div class="label">Profit after tax (PAT)</div>
+                <div class="previous"><input type="number" value="100"></div>
+                <div class="current"><input type="number" value="130"></div>
+            </div>
+
+            <div class="section">Balance sheet</div>
+
+            <div class="data-row">
+                <div class="label">Total assets</div>
+                <div class="previous dash">-</div>
+                <div class="current"><input type="number" value="1500"></div>
+            </div>
+
+            <div class="data-row">
+                <div class="label">Shareholders' equity</div>
+                <div class="previous dash">-</div>
+                <div class="current"><input type="number" value="800"></div>
+            </div>
+
+            <div class="data-row">
+                <div class="label">Borrowings</div>
+                <div class="previous dash">-</div>
+                <div class="current"><input type="number" value="250"></div>
+            </div>
+
+            <div class="data-row">
+                <div class="label">Current assets</div>
+                <div class="previous dash">-</div>
+                <div class="current"><input type="number" value="600"></div>
+            </div>
+
+            <div class="data-row">
+                <div class="label">Current liabilities</div>
+                <div class="previous dash">-</div>
+                <div class="current"><input type="number" value="350"></div>
+            </div>
+
+        </div>
+
+        <div class="market-title">Market data</div>
+
+        <div class="market-grid">
+
+            <div class="field">
+                <label>Number of shares (in the unit chosen above)</label>
+                <input type="number" value="20">
+            </div>
+
+            <div class="field">
+                <label>Current share price (Rs)</label>
+                <input type="number" value="130">
+            </div>
+
+            <div class="field">
+                <label>Peer median P/E (optional)</label>
+                <input type="number" value="22">
+            </div>
+
+            <div class="field">
+                <label>Peer median P/B (optional)</label>
+                <input type="number" value="3">
+            </div>
+
+            <div class="field">
+                <label>Benchmark bond yield, % (optional)</label>
+                <input type="number" value="7">
+            </div>
+
+            <div></div>
+
+        </div>
+
+        <div class="actions">
+
+            <!-- Exact button name: Build the module -->
+            <button
+                type="button"
+                id="buildModuleBtn"
+                class="build-module active"
+                onclick="buildModule()">
+                Build the module
+            </button>
+
+            <button
+                type="button"
+                class="analyse"
+                onclick="analyseCompany()">
+                Analyse company
+            </button>
+
+            <button
+                type="button"
+                class="clear"
+                onclick="clearFigures()">
+                Clear all figures
+            </button>
+
+        </div>
+
+        <div id="moduleMessage" class="module-message"></div>
+
+        <p class="note">
+            Previous-year income statement figures are used for growth and margin comparison.
+            Peer multiples and the bond yield are optional and add valuation context.
+            At least four measures must be calculable. The values shown are sample figures for a fictional company.
+        </p>
+
+    </div>
+</div>
+
+<script>
+function buildModule() {
+    const button = document.getElementById("buildModuleBtn");
+    const message = document.getElementById("moduleMessage");
+
+    button.classList.add("active");
+
+    message.style.display = "block";
+    message.innerHTML =
+        "<strong>Build the module</strong> is active.";
+}
+
+function analyseCompany() {
+    const revenuePrevious =
+        parseFloat(document.querySelectorAll(".data-row input")[0].value) || 0;
+
+    const revenueCurrent =
+        parseFloat(document.querySelectorAll(".data-row input")[1].value) || 0;
+
+    const ebitCurrent =
+        parseFloat(document.querySelectorAll(".data-row input")[3].value) || 0;
+
+    const patCurrent =
+        parseFloat(document.querySelectorAll(".data-row input")[5].value) || 0;
+
+    let revenueGrowth = 0;
+    let ebitMargin = 0;
+    let patMargin = 0;
+
+    if (revenuePrevious !== 0) {
+        revenueGrowth =
+            ((revenueCurrent - revenuePrevious) / revenuePrevious) * 100;
+    }
+
+    if (revenueCurrent !== 0) {
+        ebitMargin = (ebitCurrent / revenueCurrent) * 100;
+        patMargin = (patCurrent / revenueCurrent) * 100;
+    }
+
+    alert(
+        "Company Analysis\n\n" +
+        "Revenue Growth: " + revenueGrowth.toFixed(2) + "%\n" +
+        "EBIT Margin: " + ebitMargin.toFixed(2) + "%\n" +
+        "PAT Margin: " + patMargin.toFixed(2) + "%"
+    );
+}
+
+function clearFigures() {
+    document.querySelectorAll("input").forEach(function(input) {
+        input.value = "";
+    });
+
+    document.querySelectorAll("select").forEach(function(select) {
+        select.selectedIndex = 0;
+    });
+
+    document.getElementById("moduleMessage").style.display = "none";
+    document.getElementById("moduleMessage").innerHTML = "";
+
+    // Keep "Build the module" active
+    document.getElementById("buildModuleBtn").classList.add("active");
+}
+</script>
+
+</body>
+</html>

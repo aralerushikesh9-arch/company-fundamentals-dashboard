@@ -1,0 +1,8 @@
+{
+  "name": "company-fundamentals-dashboard",
+  "version": "1.0.0",
+  "description": "Company fundamentals dashboard: profitability, financial position, returns and valuation calculated in code, commentary written by Claude using a SKILL.md",
+  "private": true,
+  "scripts": { "test": "node test.js" },
+  "engines": { "node": ">=18" }
+}

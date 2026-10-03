@@ -1,0 +1,319 @@
+// Serverless function for Vercel.
+// Every figure, ratio, multiple and check is calculated HERE in code, not by the AI.
+// Claude only writes the commentary, using the rules in skill/SKILL.md.
+
+const fs = require("fs");
+const path = require("path");
+
+const UNIT_MULT = { "Rs": 1, "Rs thousands": 1e3, "Rs lakhs": 1e5, "Rs crore": 1e7, "Rs millions": 1e6 };
+const SHARE_MULT = { "Shares": 1, "Thousand shares": 1e3, "Lakh shares": 1e5, "Crore shares": 1e7, "Million shares": 1e6 };
+const MIN_METRICS = 4;
+
+// Income statement fields (current year, previous year optional)
+const IS_FIELDS = [
+  { key: "revenue", label: "Revenue", nonNeg: true },
+  { key: "ebit", label: "Operating profit (EBIT)" },
+  { key: "da", label: "Depreciation and amortisation", nonNeg: true },
+  { key: "pat", label: "Profit after tax (PAT)" },
+];
+// Balance sheet fields (current year only)
+const BS_FIELDS = [
+  { key: "totalAssets", label: "Total assets", nonNeg: true },
+  { key: "equity", label: "Shareholders' equity" },
+  { key: "borrowings", label: "Borrowings", nonNeg: true },
+  { key: "currentAssets", label: "Current assets", nonNeg: true },
+  { key: "currentLiabilities", label: "Current liabilities", nonNeg: true },
+];
+// Market data
+const MKT_FIELDS = [
+  { key: "shares", label: "Number of shares", positive: true },
+  { key: "price", label: "Share price", positive: true },
+  { key: "peerPE", label: "Peer median P/E", positive: true },
+  { key: "peerPB", label: "Peer median P/B", positive: true },
+  { key: "bondYield", label: "Benchmark bond yield", nonNeg: true },
+];
+const LABEL = Object.fromEntries([...IS_FIELDS, ...BS_FIELDS, ...MKT_FIELDS].map((f) => [f.key, f.label]));
+const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+function loadSkill() {
+  try {
+    return fs.readFileSync(path.join(process.cwd(), "skill", "SKILL.md"), "utf8");
+  } catch (e) {
+    return "Write a short, factual, neutral commentary on the company fundamentals. Use only the numbers given. Never state causes as fact. Never recommend buying or selling.";
+  }
+}
+
+// ---------- input ----------
+function parseObj(obj, fields, name) {
+  const out = {};
+  let any = false;
+  for (const f of fields) {
+    const raw = obj ? obj[f.key] : undefined;
+    if (raw === undefined || raw === null || String(raw).trim() === "") { out[f.key] = null; continue; }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return { error: name + f.label + " must be a number." };
+    if (f.nonNeg && n < 0) return { error: name + f.label + " cannot be negative." };
+    if (f.positive && n <= 0) return { error: name + f.label + " must be greater than zero." };
+    out[f.key] = n;
+    any = true;
+  }
+  return { values: out, any };
+}
+
+function validate(body) {
+  if (!body || typeof body !== "object") return { error: "Send the figures as JSON." };
+  if (!(body.unit in UNIT_MULT)) return { error: "Choose a valid unit for the financial figures." };
+  if (!(body.shareUnit in SHARE_MULT)) return { error: "Choose a valid unit for the number of shares." };
+  const company = typeof body.company === "string" ? body.company.trim().slice(0, 80) : "";
+  const cur = parseObj(body.current, [...IS_FIELDS, ...BS_FIELDS], "Current year: ");
+  if (cur.error) return cur;
+  const prev = parseObj(body.previous, IS_FIELDS, "Previous year: ");
+  if (prev.error) return prev;
+  const mkt = parseObj(body.market, MKT_FIELDS, "");
+  if (mkt.error) return mkt;
+  return { unit: body.unit, shareUnit: body.shareUnit, company, c: cur.values, p: prev.any ? prev.values : null, m: mkt.values };
+}
+
+// ---------- calculations ----------
+const R = (value) => ({ value: round2(value), reason: null });
+const N = (reason) => ({ value: null, reason });
+const missing = (obj, keys) => {
+  const m = keys.filter((k) => obj[k] === null || obj[k] === undefined).map((k) => LABEL[k]);
+  return m.length ? "Missing: " + m.join(" and ") : null;
+};
+const ebitdaOf = (o) => (o && o.ebit !== null && o.da !== null ? o.ebit + o.da : null);
+
+function derive(input) {
+  const { c, p, m, unit, shareUnit } = input;
+  const ebitdaC = ebitdaOf(c);
+  const ebitdaP = ebitdaOf(p);
+  const sharesCount = m.shares === null ? null : m.shares * SHARE_MULT[shareUnit];
+  const patRs = c.pat === null ? null : c.pat * UNIT_MULT[unit];
+  const equityRs = c.equity === null ? null : c.equity * UNIT_MULT[unit];
+  const eps = patRs !== null && sharesCount !== null ? patRs / sharesCount : null;
+  const bvps = equityRs !== null && sharesCount !== null ? equityRs / sharesCount : null;
+  return { ebitdaC, ebitdaP, sharesCount, eps, bvps };
+}
+
+function margin(numerator, revenue, label, revLabel) {
+  if (numerator === null || revenue === null) return N("Missing: " + (numerator === null ? label : revLabel));
+  if (revenue === 0) return N("Revenue is zero");
+  return R((numerator / revenue) * 100);
+}
+
+function buildMetrics(input, d) {
+  const { c, p, m } = input;
+  const out = [];
+  const add = (section, key, name, formula, unit, current, previous) =>
+    out.push({ section, key, name, formula, unit, current, previous: previous || null });
+
+  // Profitability
+  let growth;
+  if (!p || p.revenue === null) growth = N("Previous-year revenue not entered");
+  else if (c.revenue === null) growth = N("Missing: Revenue");
+  else if (p.revenue === 0) growth = N("Previous-year revenue is zero");
+  else growth = R(((c.revenue - p.revenue) / p.revenue) * 100);
+  add("Profitability", "revenueGrowth", "Revenue growth", "(Current revenue - Previous revenue) / Previous revenue x 100", "%", growth);
+
+  add("Profitability", "ebitdaMargin", "EBITDA margin", "EBITDA / Revenue x 100", "%",
+    d.ebitdaC === null ? N("Missing: Operating profit (EBIT) and Depreciation and amortisation") : margin(d.ebitdaC, c.revenue, "EBITDA", "Revenue"),
+    p ? (d.ebitdaP === null ? N("Previous-year EBIT or depreciation not entered") : margin(d.ebitdaP, p.revenue, "EBITDA", "Revenue")) : null);
+  add("Profitability", "patMargin", "PAT margin", "PAT / Revenue x 100", "%",
+    margin(c.pat, c.revenue, "PAT", "Revenue"), p ? margin(p.pat, p.revenue, "PAT", "Revenue") : null);
+  add("Profitability", "eps", "EPS (Rs per share)", "PAT / Number of shares", "Rs",
+    d.eps === null ? N(missing({ pat: c.pat, shares: m.shares }, ["pat", "shares"])) : R(d.eps));
+
+  // Financial position
+  let de;
+  if (missing(c, ["borrowings", "equity"])) de = N(missing(c, ["borrowings", "equity"]));
+  else if (c.equity <= 0) de = N("Shareholders' equity is zero or negative, so the ratio is not meaningful");
+  else de = R(c.borrowings / c.equity);
+  add("Financial position", "debtToEquity", "Debt-to-equity", "Borrowings / Shareholders' equity", "x", de);
+  let cr;
+  if (missing(c, ["currentAssets", "currentLiabilities"])) cr = N(missing(c, ["currentAssets", "currentLiabilities"]));
+  else if (c.currentLiabilities === 0) cr = N("Current liabilities are zero");
+  else cr = R(c.currentAssets / c.currentLiabilities);
+  add("Financial position", "currentRatio", "Current ratio", "Current assets / Current liabilities", "x", cr);
+
+  // Returns
+  let roe;
+  if (missing(c, ["pat", "equity"])) roe = N(missing(c, ["pat", "equity"]));
+  else if (c.equity <= 0) roe = N("Shareholders' equity is zero or negative, so ROE is not meaningful");
+  else roe = R((c.pat / c.equity) * 100);
+  add("Returns", "roe", "Return on equity (ROE)", "PAT / Shareholders' equity x 100", "%", roe);
+  let roce;
+  if (missing(c, ["ebit", "totalAssets", "currentLiabilities"])) roce = N(missing(c, ["ebit", "totalAssets", "currentLiabilities"]));
+  else if (c.totalAssets - c.currentLiabilities <= 0) roce = N("Capital employed (total assets less current liabilities) is zero or negative");
+  else roce = R((c.ebit / (c.totalAssets - c.currentLiabilities)) * 100);
+  add("Returns", "roce", "Return on capital employed (ROCE)", "EBIT / (Total assets - Current liabilities) x 100", "%", roce);
+  let roa;
+  if (missing(c, ["pat", "totalAssets"])) roa = N(missing(c, ["pat", "totalAssets"]));
+  else if (c.totalAssets === 0) roa = N("Total assets are zero");
+  else roa = R((c.pat / c.totalAssets) * 100);
+  add("Returns", "roa", "Return on assets (ROA)", "PAT / Total assets x 100", "%", roa);
+
+  // Valuation
+  let pe;
+  if (m.price === null || d.eps === null) pe = N("Missing: " + [m.price === null ? "Share price" : null, d.eps === null ? "EPS (needs PAT and number of shares)" : null].filter(Boolean).join(" and "));
+  else if (d.eps <= 0) pe = N("EPS is zero or negative, so P/E is not meaningful");
+  else pe = R(m.price / d.eps);
+  add("Valuation", "pe", "P/E", "Share price / EPS", "x", pe);
+  let pb;
+  if (m.price === null || d.bvps === null) pb = N("Missing: " + [m.price === null ? "Share price" : null, d.bvps === null ? "Shareholders' equity and number of shares" : null].filter(Boolean).join(" and "));
+  else if (d.bvps <= 0) pb = N("Book value per share is zero or negative, so P/B is not meaningful");
+  else pb = R(m.price / d.bvps);
+  add("Valuation", "pb", "P/B", "Share price / Book value per share", "x", pb);
+  let ey;
+  if (m.price === null || d.eps === null) ey = N("Missing: " + [m.price === null ? "Share price" : null, d.eps === null ? "EPS (needs PAT and number of shares)" : null].filter(Boolean).join(" and "));
+  else ey = R((d.eps / m.price) * 100);
+  add("Valuation", "earningsYield", "Earnings yield", "EPS / Share price x 100", "%", ey);
+  return out;
+}
+
+function buildFigures(input, d) {
+  const { c, p } = input;
+  const rows = [];
+  const add = (section, label, previous, current) => {
+    let changePct = null, note = null;
+    if (previous !== null && current !== null) {
+      if (previous > 0) changePct = round2(((current - previous) / previous) * 100);
+      else note = "Previous value is zero or negative, so the percentage change is not meaningful";
+    }
+    rows.push({ section, label, previous: previous === null ? null : round2(previous), current: current === null ? null : round2(current), changePct, note });
+  };
+  add("Profitability", "Revenue", p ? p.revenue : null, c.revenue);
+  add("Profitability", "Operating profit (EBIT)", p ? p.ebit : null, c.ebit);
+  add("Profitability", "EBITDA", d.ebitdaP, d.ebitdaC);
+  add("Profitability", "Profit after tax (PAT)", p ? p.pat : null, c.pat);
+  add("Financial position", "Total assets", null, c.totalAssets);
+  add("Financial position", "Shareholders' equity", null, c.equity);
+  add("Financial position", "Borrowings", null, c.borrowings);
+  return rows.filter((r) => r.current !== null || r.previous !== null);
+}
+
+function buildContext(input, metrics) {
+  const { m } = input;
+  const get = (k) => metrics.find((x) => x.key === k).current.value;
+  const out = [];
+  if (m.peerPE !== null && get("pe") !== null) {
+    const pct = round2((get("pe") / m.peerPE - 1) * 100);
+    out.push({ label: "P/E versus peer median", value: pct, unit: "%", text: "Company P/E " + get("pe") + "x against peer median " + m.peerPE + "x: " + Math.abs(pct) + "% " + (pct < 0 ? "below" : pct > 0 ? "above" : "equal to") + " the peer median" });
+  }
+  if (m.peerPB !== null && get("pb") !== null) {
+    const pct = round2((get("pb") / m.peerPB - 1) * 100);
+    out.push({ label: "P/B versus peer median", value: pct, unit: "%", text: "Company P/B " + get("pb") + "x against peer median " + m.peerPB + "x: " + Math.abs(pct) + "% " + (pct < 0 ? "below" : pct > 0 ? "above" : "equal to") + " the peer median" });
+  }
+  if (m.bondYield !== null && get("earningsYield") !== null) {
+    const spread = round2(get("earningsYield") - m.bondYield);
+    out.push({ label: "Earnings yield versus bond yield", value: spread, unit: "pp", text: "Earnings yield " + get("earningsYield") + "% against benchmark bond yield " + m.bondYield + "%: " + Math.abs(spread) + " percentage points " + (spread < 0 ? "below" : spread > 0 ? "above" : "equal to") + " the bond yield" });
+  }
+  return out;
+}
+
+const tol = (a, b) => Math.max(0, 0.001 * Math.max(Math.abs(a), Math.abs(b)));
+function buildChecks(input) {
+  const { c } = input;
+  const checks = [];
+  const add = (name, pass, detail) => checks.push({ name, status: pass ? "ok" : "mismatch", detail });
+  if (c.currentAssets !== null && c.totalAssets !== null)
+    add("Current assets not above total assets", c.currentAssets <= c.totalAssets + tol(c.currentAssets, c.totalAssets), "Current assets " + c.currentAssets + ", total assets " + c.totalAssets);
+  if (c.equity !== null && c.totalAssets !== null)
+    add("Shareholders' equity not above total assets", c.equity <= c.totalAssets + tol(c.equity, c.totalAssets), "Equity " + c.equity + ", total assets " + c.totalAssets);
+  if (c.borrowings !== null && c.totalAssets !== null)
+    add("Borrowings not above total assets", c.borrowings <= c.totalAssets + tol(c.borrowings, c.totalAssets), "Borrowings " + c.borrowings + ", total assets " + c.totalAssets);
+  if (c.ebit !== null && c.revenue !== null)
+    add("Operating profit not above revenue", c.ebit <= c.revenue, "EBIT " + c.ebit + ", revenue " + c.revenue);
+  if (c.pat !== null && c.revenue !== null)
+    add("PAT not above revenue", c.pat <= c.revenue, "PAT " + c.pat + ", revenue " + c.revenue);
+  return checks;
+}
+
+function analyse(input) {
+  const d = derive(input);
+  const metrics = buildMetrics(input, d);
+  return {
+    unit: input.unit,
+    shareUnit: input.shareUnit,
+    company: input.company,
+    hasPrevious: !!input.p,
+    figures: buildFigures(input, d),
+    metrics,
+    valuationContext: buildContext(input, metrics),
+    checks: buildChecks(input),
+    calculated: metrics.filter((x) => x.current.value !== null).length,
+  };
+}
+
+// ---------- commentary ----------
+const fmt = (n) => Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const showM = (m, v) => fmt(v) + (m.unit === "%" ? "%" : m.unit === "x" ? "x" : "");
+
+// Backup mode: used only if the Claude call fails. Written by code from the calculated results.
+function templateCommentary(r) {
+  const out = ["Overview", "Figures are in " + r.unit + "; per-share figures are in rupees. Ratios use closing balances. This is a factual summary generated by code from the calculated figures."];
+  ["Profitability", "Financial position", "Returns", "Valuation"].forEach((section) => {
+    out.push("", section === "Financial position" ? "Financial Position" : section);
+    const lines = [];
+    r.metrics.filter((x) => x.section === section && x.current.value !== null).forEach((x) => {
+      lines.push("- " + x.name + ": " + showM(x, x.current.value) + (x.previous && x.previous.value !== null ? " (previous year " + showM(x, x.previous.value) + ")" : ""));
+    });
+    if (section === "Valuation") r.valuationContext.forEach((x) => lines.push("- " + x.text));
+    (lines.length ? lines : ["- No measures in this section could be calculated from the figures entered."]).forEach((l) => out.push(l));
+  });
+  out.push("", "Points to Verify");
+  const pts = [];
+  r.checks.filter((c) => c.status === "mismatch").forEach((c) => pts.push("Data check failed: " + c.name + "."));
+  r.metrics.filter((x) => x.current.value === null).slice(0, 3).forEach((x) => pts.push(x.name + " not calculated: " + x.current.reason + "."));
+  pts.push("Multiples such as P/E and P/B need a peer or historical comparison, and industries differ.");
+  pts.slice(0, 5).forEach((l) => out.push("- " + l));
+  return out.join("\n");
+}
+
+async function getCommentary(result) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("ANTHROPIC_API_KEY is not set on the server.");
+  const model = process.env.CLAUDE_MODEL || "claude-sonnet-5-5";
+  const userMessage =
+    "Financial figures unit: " + result.unit + ". Share count unit: " + result.shareUnit + ". Company: " + (result.company || "not named") + ".\n" +
+    "Previous-year figures provided: " + (result.hasPrevious ? "yes" : "no") + ".\n" +
+    "The figures, ratios, multiples and checks below are already calculated and displayed to the user. Do not recalculate or change any number. Use application mode from the skill.\n\n" +
+    JSON.stringify(result, null, 2) + "\n\nWrite the analysis now.";
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1100,
+      system: loadSkill() + "\n\nReply in plain text only.",
+      messages: [{ role: "user", content: userMessage }],
+    }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error((data && data.error && data.error.message) || "Claude API request failed.");
+  return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+}
+
+module.exports = async (req, res) => {
+  if (req.method !== "POST") { res.status(405).json({ error: "Use POST." }); return; }
+  const input = validate(req.body);
+  if (input.error) { res.status(400).json({ error: input.error }); return; }
+  const result = analyse(input);
+  if (result.calculated < MIN_METRICS) {
+    const why = result.metrics.filter((x) => x.current.value === null).map((x) => x.name + ": " + x.current.reason).join("; ");
+    res.status(400).json({ error: "Not enough figures: at least " + MIN_METRICS + " measures must be calculable and only " + result.calculated + " could be. " + why });
+    return;
+  }
+  let commentary, source = "claude", error = null;
+  try {
+    commentary = await getCommentary(result);
+  } catch (e) {
+    error = e.message;
+    commentary = templateCommentary(result);
+    source = "template";
+  }
+  res.status(200).json({ ...result, commentary, commentarySource: source, commentaryError: error });
+};
+
+module.exports.analyse = analyse;
+module.exports.validate = validate;
+module.exports.templateCommentary = templateCommentary;
